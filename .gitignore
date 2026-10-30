@@ -1,0 +1,23 @@
+# Local toolchain
+/tools/
+
+# Personal phone audit data (contains device paths and media names)
+/scan/
+/ask-first.txt
+/probably-junk.txt
+/safe-junk.txt
+/cleanup-report.md
+/deletion-report.md
+/data/
+
+# Build output
+/android-cleaner/node_modules/
+/android-cleaner/dist/
+/android-cleaner/src-tauri/target/
+/android-cleaner/core/target/
+/android-cleaner/launcher/target/
+/android-cleaner/data/
+/android-cleaner/runtime/
+
+# Generated copy; the root executable is the committed artifact
+/android-cleaner/AndroidStorageCleaner.exe
