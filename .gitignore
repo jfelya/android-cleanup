@@ -19,5 +19,6 @@
 /android-cleaner/data/
 /android-cleaner/runtime/
 
-# Generated copy; the root executable is the committed artifact
+# Generated application executables
+/AndroidStorageCleaner.exe
 /android-cleaner/AndroidStorageCleaner.exe
