@@ -1,7 +1,9 @@
 pub mod adb;
 pub mod cleanup;
 pub mod config;
+pub mod disk;
 pub mod duplicates;
+pub mod health;
 pub mod model;
 pub mod report;
 pub mod rules;

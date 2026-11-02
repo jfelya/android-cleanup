@@ -36,6 +36,7 @@ export const defaultProtectedPaths = [
 export const fallbackConfig: AppConfig = {
   protectedPaths: defaultProtectedPaths,
   enabledCategories: [],
+  customRules: [],
   deepDuplicates: true,
   duplicateCapFiles: 5000,
   duplicateCapBytes: 2 * 1024 * 1024 * 1024,

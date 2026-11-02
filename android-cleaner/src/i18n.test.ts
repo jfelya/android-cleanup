@@ -5,6 +5,7 @@ describe("translate", () => {
   it("defaults to Spanish copy", () => {
     expect(translate("es", "nav.connect")).toBe("Conectar");
     expect(translate("es", "theme.light")).toBe("Claro");
+    expect(translate("es", "health.title")).toBe("Salud del dispositivo");
   });
 
   it("serves English copy", () => {

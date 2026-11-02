@@ -1,6 +1,8 @@
 use crate::adb::AdbClient;
-use crate::model::{FileEntry, FolderStat, ScanData};
+use crate::model::{FileEntry, FileTypeStat, FolderStat, ScanData};
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub const ROOT: &str = "/storage/emulated/0";
 pub const SCAN_COMMAND: &str =
@@ -52,25 +54,71 @@ pub fn build_folder_stats(entries: &[FileEntry]) -> Vec<FolderStat> {
         .collect()
 }
 
+pub fn build_type_stats(entries: &[FileEntry]) -> Vec<FileTypeStat> {
+    let mut map: BTreeMap<&'static str, (usize, u64)> = BTreeMap::new();
+    for entry in entries {
+        let kind = type_kind(&entry.path);
+        let slot = map.entry(kind).or_insert((0, 0));
+        slot.0 += 1;
+        slot.1 += entry.size;
+    }
+    ["images", "video", "audio", "documents", "archives", "apk", "other"]
+        .into_iter()
+        .map(|kind| {
+            let (files, bytes) = map.get(kind).copied().unwrap_or((0, 0));
+            FileTypeStat {
+                kind: kind.to_string(),
+                files,
+                bytes,
+            }
+        })
+        .collect()
+}
+
+fn type_kind(path: &str) -> &'static str {
+    let ext = path
+        .rsplit('/')
+        .next()
+        .and_then(|name| name.rsplit_once('.'))
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "heic" | "avif" | "bmp" | "svg" => "images",
+        "mp4" | "mkv" | "ts" | "webm" | "mov" | "avi" | "3gp" | "m4v" => "video",
+        "mp3" | "m4a" | "flac" | "wav" | "opus" | "ogg" | "aac" | "wma" => "audio",
+        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "txt" | "md" | "csv"
+        | "epub" | "json" | "xml" => "documents",
+        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" | "iso" => "archives",
+        "apk" | "apks" | "xapk" => "apk",
+        _ => "other",
+    }
+}
+
 pub fn scan(
     serial: &str,
     client: &AdbClient,
     mut on_progress: impl FnMut(usize),
+    cancelled: Arc<AtomicBool>,
 ) -> Result<ScanData, String> {
     client.start_server()?;
-    let output = client.exec_out(serial, SCAN_COMMAND)?;
     let mut entries = Vec::new();
-    for (idx, line) in output.lines().enumerate() {
-        if let Some(entry) = parse_stat_line(line) {
-            entries.push(entry);
-        }
-        if idx % 2000 == 1999 {
-            on_progress(entries.len());
-        }
-    }
+    client.stream_exec_out(
+        serial,
+        SCAN_COMMAND,
+        |line| {
+            if let Some(entry) = parse_stat_line(line) {
+                entries.push(entry);
+                if entries.len() % 500 == 0 {
+                    on_progress(entries.len());
+                }
+            }
+        },
+        || cancelled.load(Ordering::Relaxed),
+    )?;
     on_progress(entries.len());
     let total_bytes = entries.iter().map(|e| e.size).sum();
     let folders = build_folder_stats(&entries);
+    let type_stats = build_type_stats(&entries);
     Ok(ScanData {
         serial: serial.to_string(),
         scanned_at: chrono::Local::now().to_rfc3339(),
@@ -78,6 +126,7 @@ pub fn scan(
         total_bytes,
         entries,
         folders,
+        type_stats,
     })
 }
 
@@ -147,5 +196,23 @@ mod tests {
     fn parses_multiple_lines_and_skips_bad() {
         let text = "1|10|/storage/emulated/0/a\nbad\n2|11|/storage/emulated/0/b\n";
         assert_eq!(parse_stat_output(text).len(), 2);
+    }
+
+    #[test]
+    fn groups_file_types() {
+        let entries = vec![
+            entry("/storage/emulated/0/a.jpg", 10),
+            entry("/storage/emulated/0/b.mp4", 20),
+            entry("/storage/emulated/0/c.zip", 30),
+            entry("/storage/emulated/0/d.apk", 40),
+            entry("/storage/emulated/0/e.unknown", 50),
+        ];
+        let stats = build_type_stats(&entries);
+        let get = |kind: &str| stats.iter().find(|s| s.kind == kind).unwrap();
+        assert_eq!(get("images").bytes, 10);
+        assert_eq!(get("video").bytes, 20);
+        assert_eq!(get("archives").bytes, 30);
+        assert_eq!(get("apk").bytes, 40);
+        assert_eq!(get("other").bytes, 50);
     }
 }

@@ -3,10 +3,13 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppConfig,
   AppInfo,
+  CategorySummary,
   DeviceInfo,
   DeviceRow,
+  DiskStats,
   DryRun,
   ExecutionReport,
+  HealthSnapshot,
   RuleCategory,
   ScanData,
   WirelessService,
@@ -29,15 +32,24 @@ export const api = {
   pairWireless: (host: string, code: string) =>
     call<string>("pair_wireless", { host, code }),
   connectWireless: (host: string) => call<string>("connect_wireless", { host }),
+  disconnectWireless: (host: string) =>
+    call<string>("disconnect_wireless", { host }),
   loadConfig: () => call<AppConfig>("load_config"),
   saveConfig: (config: AppConfig) => call<void>("save_config", { config }),
   ruleCategories: () => call<RuleCategory[]>("rule_categories"),
   scanDevice: (serial: string) => call<ScanData>("scan_device", { serial }),
-  buildDryRun: () => call<DryRun>("build_dry_run"),
-  executeCleanup: (serial: string, confirmation: string, paths: string[]) =>
-    call<ExecutionReport>("execute_cleanup", { serial, confirmation, paths }),
+  cancelScan: () => call<void>("cancel_scan"),
+  scanRuleCounts: (serial: string) =>
+    call<CategorySummary[]>("scan_rule_counts", { serial }),
+  buildDryRun: (serial: string, language: string) =>
+    call<DryRun>("build_dry_run", { serial, language }),
+  executeCleanup: (serial: string, confirmation: string, paths: string[], language: string) =>
+    call<ExecutionReport>("execute_cleanup", { serial, confirmation, paths, language }),
   trimCache: (serial: string, targetBytes: number) =>
     call<number>("trim_cache", { serial, targetBytes }),
+  diskStats: (serial: string) => call<DiskStats>("disk_stats", { serial }),
+  deviceHealth: (serial: string) => call<HealthSnapshot>("device_health", { serial }),
+  readText: (path: string) => call<string>("read_text", { path }),
   listReports: () => call<string[]>("list_reports"),
   openDataDir: () => call<void>("open_data_dir"),
 };

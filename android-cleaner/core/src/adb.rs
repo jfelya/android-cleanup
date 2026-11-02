@@ -135,10 +135,11 @@ impl AdbClient {
         let model = self.getprop(serial, "ro.product.model")?;
         let release = self.getprop(serial, "ro.build.version.release")?;
         let sdk = self.getprop(serial, "ro.build.version.sdk")?;
-        let product = self.getprop(serial, "ro.product.product.name")?;
+        let market = self.getprop(serial, "ro.product.marketname")?;
         let device = self.getprop(serial, "ro.product.device")?;
         let df = self.shell(serial, "df -k /storage/emulated/0")?;
         let (storage_total, storage_free) = parse_df(&df).unwrap_or((0, 0));
+        let product = if market.is_empty() { model.clone() } else { market };
         Ok(DeviceInfo {
             serial: serial.into(),
             state: "device".into(),
@@ -154,7 +155,15 @@ impl AdbClient {
 
     pub fn getprop(&self, serial: &str, key: &str) -> Result<String, String> {
         let out = self.shell(serial, &format!("getprop {key}"))?;
-        Ok(out.trim().to_string())
+        let value = out
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect::<String>();
+        Ok(value.chars().take(80).collect())
     }
 
     pub fn shell(&self, serial: &str, cmd: &str) -> Result<String, String> {
@@ -195,6 +204,66 @@ impl AdbClient {
             None,
         )?;
         Ok(out.stdout)
+    }
+
+    /// Stream stdout from `adb exec-out` line by line. Used by the scanner so
+    /// progress is visible and a cancel request can stop the child process.
+    pub fn stream_exec_out<F, C>(
+        &self,
+        serial: &str,
+        cmd: &str,
+        mut on_line: F,
+        cancelled: C,
+    ) -> Result<(), String>
+    where
+        F: FnMut(&str),
+        C: Fn() -> bool,
+    {
+        use std::io::{BufRead, BufReader};
+        if cancelled() {
+            return Err("scan cancelled".into());
+        }
+        let mut process = Command::new(&self.adb);
+        process
+            .args(["-s", serial, "exec-out", cmd])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            process.creation_flags(0x0800_0000);
+        }
+        let mut child = process
+            .spawn()
+            .map_err(|e| format!("cannot run adb at {}: {e}", self.adb.display()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "adb stdout was not piped".to_string())?;
+        for line in BufReader::new(stdout).lines() {
+            if cancelled() {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("scan cancelled".into());
+            }
+            match line {
+                Ok(line) => on_line(&line),
+                Err(e) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("read adb output: {e}"));
+                }
+            }
+        }
+        let status = child.wait().map_err(|e| format!("wait for adb: {e}"))?;
+        if cancelled() {
+            return Err("scan cancelled".into());
+        }
+        if !status.success() {
+            return Err(format!("adb exec-out failed with {status}"));
+        }
+        Ok(())
     }
 
     pub fn mdns_services(&self) -> Result<Vec<WirelessService>, String> {

@@ -25,8 +25,17 @@ pub const DEFAULT_PROTECTED: &[&str] = &[
 
 pub const ALL_CATEGORIES: &[&str] = &[
     "S1", "S2", "S3", "S4", "S5", "S6", "S7", "P1", "P2", "P3", "P4", "P5", "P6", "P7",
-    "P8", "P9", "P10", "WA_MEDIA", "TG_MEDIA",
+    "P8", "P9", "P10", "WA_MEDIA", "TG_MEDIA", "CUSTOM",
 ];
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomRule {
+    pub label: String,
+    pub path_prefix: String,
+    #[serde(default)]
+    pub extensions: Vec<String>,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +44,8 @@ pub struct AppConfig {
     pub protected_paths: Vec<String>,
     #[serde(default = "default_categories")]
     pub enabled_categories: Vec<String>,
+    #[serde(default)]
+    pub custom_rules: Vec<CustomRule>,
     #[serde(default = "default_true")]
     pub deep_duplicates: bool,
     #[serde(default = "default_cap_files")]
@@ -71,6 +82,7 @@ impl Default for AppConfig {
         Self {
             protected_paths: default_protected(),
             enabled_categories: default_categories(),
+            custom_rules: Vec::new(),
             deep_duplicates: true,
             duplicate_cap_files: default_cap_files(),
             duplicate_cap_bytes: default_cap_bytes(),

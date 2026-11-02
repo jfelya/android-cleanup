@@ -39,8 +39,18 @@ pub struct ScanData {
     pub scanned_at: String,
     pub total_files: usize,
     pub total_bytes: u64,
+    #[serde(default, skip_serializing)]
     pub entries: Vec<FileEntry>,
     pub folders: Vec<FolderStat>,
+    pub type_stats: Vec<FileTypeStat>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTypeStat {
+    pub kind: String,
+    pub files: usize,
+    pub bytes: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -96,6 +106,15 @@ pub struct DryRunSummary {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct DuplicateSummary {
+    pub hash: String,
+    pub size: u64,
+    pub keep: String,
+    pub copies: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct DryRun {
     pub id: String,
     pub generated_at: String,
@@ -104,6 +123,7 @@ pub struct DryRun {
     pub categories: Vec<CategorySummary>,
     pub protected_paths: Vec<String>,
     pub candidates: Vec<Candidate>,
+    pub duplicates: Vec<DuplicateSummary>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -153,4 +173,12 @@ pub struct WirelessService {
     pub name: String,
     pub service_type: String,
     pub address: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskStats {
+    pub app_cache_bytes: u64,
+    pub app_data_bytes: u64,
+    pub free_bytes: u64,
 }

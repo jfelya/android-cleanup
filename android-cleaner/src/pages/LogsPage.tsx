@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FileClock, FolderOpen, RefreshCw } from "lucide-react";
+import { FileClock, FolderOpen, RefreshCw, X } from "lucide-react";
 import { api } from "../lib/tauri";
 import { useAppStore } from "../store";
 import { useI18n } from "../useI18n";
@@ -10,6 +10,15 @@ export function LogsPage() {
   const { t } = useI18n();
   const [reports, setReports] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [viewer, setViewer] = useState<{ path: string; content: string } | null>(null);
+
+  const open = async (path: string) => {
+    try {
+      setViewer({ path, content: await api.readText(path) });
+    } catch (e) {
+      setError(String(e));
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -51,7 +60,22 @@ export function LogsPage() {
             {reports.map((report) => (
               <div key={report} className="report-row">
                 <FileClock size={16} />
-                <code title={report}>{shortPath(report, 100)}</code>
+                <code title={report}>{shortPath(report, 80)}</code>
+                <div className="report-actions">
+                  {[
+                    ["dry-run.md", "dry-run.md"],
+                    ["candidates.csv", "candidates.csv"],
+                    ["execution.json", "execution.json"],
+                  ].map(([file, label]) => (
+                    <button
+                      key={file}
+                      className="btn ghost small"
+                      onClick={() => open(`${report}\\${file}`)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -67,6 +91,20 @@ export function LogsPage() {
           <div><strong>logs/&lt;id&gt;.log</strong><span>{t("logs.log")}</span></div>
         </div>
       </section>
+
+      {viewer && (
+        <div className="modal-backdrop" onClick={() => setViewer(null)}>
+          <div className="modal log-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <strong>{shortPath(viewer.path, 90)}</strong>
+              <button className="icon-btn" onClick={() => setViewer(null)} aria-label={t("common.close")}>
+                <X size={16} />
+              </button>
+            </div>
+            <pre className="log-view">{viewer.content}</pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

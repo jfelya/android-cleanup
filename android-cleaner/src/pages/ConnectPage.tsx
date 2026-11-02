@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Cable,
   CheckCircle2,
@@ -28,6 +28,41 @@ export function ConnectPage() {
   const [pairHost, setPairHost] = useState("");
   const [pairCode, setPairCode] = useState("");
   const [connectHost, setConnectHost] = useState("");
+  const [knownHosts, setKnownHosts] = useState<string[]>([]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("asc.wirelessHosts");
+      if (raw) setKnownHosts(JSON.parse(raw) as string[]);
+    } catch {
+      setKnownHosts([]);
+    }
+  }, []);
+
+  const rememberHost = (host: string) => {
+    setKnownHosts((prev) => {
+      const next = Array.from(new Set([host, ...prev])).slice(0, 8);
+      localStorage.setItem("asc.wirelessHosts", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const forgetHost = async (host: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.disconnectWireless(host);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setKnownHosts((prev) => {
+        const next = prev.filter((h) => h !== host);
+        localStorage.setItem("asc.wirelessHosts", JSON.stringify(next));
+        return next;
+      });
+      setBusy(false);
+    }
+  };
 
   const refresh = async () => {
     setBusy(true);
@@ -74,6 +109,7 @@ export function ConnectPage() {
     try {
       const result = await api.connectWireless(host);
       setMessage(result || t("connect.connectedTo", { host }));
+      rememberHost(host);
       const list = await api.listDevices();
       setDevices(list);
       const target = list.find((d) => d.state === "device");
@@ -194,6 +230,26 @@ export function ConnectPage() {
           </div>
 
           <div className="wireless-form">
+            <h3>{t("connect.known")}</h3>
+            <div className="wireless-list">
+              {knownHosts.length === 0 && <p className="muted">{t("connect.noKnown")}</p>}
+              {knownHosts.map((host) => (
+                <div key={host} className="wireless-row">
+                  <div>
+                    <strong>{host}</strong>
+                    <span>{t("connect.connection")}</span>
+                  </div>
+                  <div className="inline-fields">
+                    <button className="btn small" onClick={() => connect(host)} disabled={busy}>
+                      {t("connect.connection")}
+                    </button>
+                    <button className="btn ghost small" onClick={() => forgetHost(host)} disabled={busy}>
+                      {t("connect.forget")}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
             <h3>{t("connect.pairCode")}</h3>
             <div className="inline-fields">
               <input

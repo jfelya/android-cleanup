@@ -39,8 +39,15 @@ export interface ScanData {
   scannedAt: string;
   totalFiles: number;
   totalBytes: number;
-  entries: FileEntry[];
+  entries?: FileEntry[];
   folders: FolderStat[];
+  typeStats: FileTypeStat[];
+}
+
+export interface FileTypeStat {
+  kind: string;
+  files: number;
+  bytes: number;
 }
 
 export interface RuleCategory {
@@ -86,11 +93,26 @@ export interface DryRun {
   categories: CategorySummary[];
   protectedPaths: string[];
   candidates: Candidate[];
+  duplicates: DuplicateSummary[];
+}
+
+export interface DuplicateSummary {
+  hash: string;
+  size: number;
+  keep: string;
+  copies: string[];
+}
+
+export interface CustomRule {
+  label: string;
+  pathPrefix: string;
+  extensions: string[];
 }
 
 export interface AppConfig {
   protectedPaths: string[];
   enabledCategories: string[];
+  customRules: CustomRule[];
   deepDuplicates: boolean;
   duplicateCapFiles: number;
   duplicateCapBytes: number;
@@ -108,6 +130,41 @@ export interface WirelessService {
   name: string;
   serviceType: string;
   address: string;
+}
+
+export interface DiskStats {
+  appCacheBytes: number;
+  appDataBytes: number;
+  freeBytes: number;
+}
+
+export interface KillEvent {
+  timestamp: string;
+  package: string;
+  reason: string;
+  uid: number;
+  pssKb: number;
+}
+
+export interface HealthSnapshot {
+  thermalStatus: number;
+  cpuTempC: number;
+  skinTempC: number;
+  batteryTempC: number;
+  load1: number;
+  load5: number;
+  load15: number;
+  runningThreads: number;
+  totalThreads: number;
+  memTotalKb: number;
+  memAvailableKb: number;
+  swapTotalKb: number;
+  swapFreeKb: number;
+  pswpout: number;
+  pswpin: number;
+  pgmajfault: number;
+  pgstealDirect: number;
+  kills: KillEvent[];
 }
 
 export interface DeletionStats {
@@ -131,4 +188,4 @@ export interface ExecutionReport {
   reportPath: string;
 }
 
-export type Page = "connect" | "dashboard" | "scan" | "rules" | "protected" | "report" | "logs" | "settings";
+export type Page = "connect" | "dashboard" | "health" | "scan" | "rules" | "protected" | "report" | "logs" | "settings";

@@ -15,8 +15,9 @@ export function RulesPage() {
   const setDryRun = useAppStore((s) => s.setDryRun);
   const setPage = useAppStore((s) => s.setPage);
   const setError = useAppStore((s) => s.setError);
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const [categories, setCategories] = useState<RuleCategory[]>([]);
+  const [counts, setCounts] = useState<CategorySummary[]>([]);
   const [saving, setSaving] = useState(false);
   const [building, setBuilding] = useState(false);
 
@@ -24,10 +25,23 @@ export function RulesPage() {
     api.ruleCategories().then(setCategories).catch((e) => setError(String(e)));
   }, [setError]);
 
+  useEffect(() => {
+    if (!scan) {
+      setCounts([]);
+      return;
+    }
+    api
+      .scanRuleCounts(scan.serial)
+      .then(setCounts)
+      .catch((e) => setError(String(e)));
+  }, [scan?.serial, setError]);
+
   const summaries: CategorySummary[] = useMemo(
     () =>
       categories.map((category) => {
-        const found = dryRun?.categories.find((c) => c.id === category.id);
+        const found =
+          counts.find((c) => c.id === category.id) ??
+          dryRun?.categories.find((c) => c.id === category.id);
         return {
           ...category,
           files: found?.files ?? 0,
@@ -35,7 +49,7 @@ export function RulesPage() {
           selected: config.enabledCategories.includes(category.id),
         };
       }),
-    [categories, dryRun, config.enabledCategories],
+    [categories, counts, dryRun, config.enabledCategories],
   );
 
   const maxBytes = Math.max(1, ...summaries.map((s) => s.bytes));
@@ -85,7 +99,7 @@ export function RulesPage() {
     setError(null);
     try {
       await api.saveConfig(config);
-      const dry = await api.buildDryRun();
+      const dry = await api.buildDryRun(scan.serial, language);
       setDryRun(dry);
       setPage("report");
     } catch (e) {

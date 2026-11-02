@@ -2,6 +2,7 @@ import {
   Cable,
   FileText,
   HardDrive,
+  HeartPulse,
   History,
   LayoutDashboard,
   LockKeyhole,
@@ -19,6 +20,7 @@ import { LanguageThemeToggle } from "./LanguageThemeToggle";
 const items: { id: Page; label: TranslationKey; icon: typeof Cable }[] = [
   { id: "connect", label: "nav.connect", icon: Cable },
   { id: "dashboard", label: "nav.dashboard", icon: LayoutDashboard },
+  { id: "health", label: "nav.health", icon: HeartPulse },
   { id: "scan", label: "nav.scan", icon: ScanSearch },
   { id: "rules", label: "nav.rules", icon: ShieldCheck },
   { id: "protected", label: "nav.protected", icon: LockKeyhole },

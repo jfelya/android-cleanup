@@ -5,6 +5,7 @@ import { DeviceCard } from "../components/DeviceCard";
 import { StorageRing } from "../components/StorageRing";
 import { Treemap } from "../components/Treemap";
 import { formatBytes, formatCount, percent } from "../lib/format";
+import type { TranslationKey } from "../i18n";
 
 export function DashboardPage() {
   const device = useAppStore((s) => s.device);
@@ -37,6 +38,8 @@ export function DashboardPage() {
   const used = Math.max(0, device.storageTotal - device.storageFree);
   const topFolders = scan?.folders.filter((f) => f.depth === 1).sort((a, b) => b.size - a.size) ?? [];
   const maxTop = topFolders[0]?.size ?? 1;
+  const types = (scan?.typeStats ?? []).filter((t) => t.bytes > 0).sort((a, b) => b.bytes - a.bytes);
+  const maxType = types[0]?.bytes ?? 1;
 
   return (
     <div className="page">
@@ -125,6 +128,27 @@ export function DashboardPage() {
           )}
         </section>
       </div>
+
+      {scan && (
+        <section className="card">
+          <div className="card-head">
+            <div>
+              <h2>{t("dashboard.types")}</h2>
+              <p>{t("dashboard.typesHint")}</p>
+            </div>
+          </div>
+          <div className="type-bars">
+            {types.map((type) => (
+              <div key={type.kind} className="type-row">
+                <span>{t(`type.${type.kind}` as TranslationKey)}</span>
+                <div className="bar-track"><i style={{ width: `${Math.max(2, (type.bytes / maxType) * 100)}%` }} /></div>
+                <b>{formatBytes(type.bytes)}</b>
+                <small>{t("common.filesCount", { count: formatCount(type.files) })}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="card flow-card">
         <div className="flow-step">

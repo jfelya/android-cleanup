@@ -32,7 +32,8 @@ export function ScanPage() {
       const result = await api.scanDevice(device.serial);
       setScan(result);
     } catch (e) {
-      setError(String(e));
+      const message = String(e);
+      if (!message.toLowerCase().includes("cancelled")) setError(message);
     } finally {
       setScanning(false);
     }
@@ -56,10 +57,17 @@ export function ScanPage() {
           <h1>{t("scan.title")}</h1>
           <p>{t("scan.subtitle")}</p>
         </div>
-        <button className="btn" onClick={startScan} disabled={scanning}>
-          {scanning ? <RefreshCw size={15} className="spin" /> : <ScanSearch size={15} />}
-          {scanning ? t("scan.scanning") : scan ? t("scan.rescan") : t("scan.start")}
-        </button>
+        <div className="head-actions">
+          {scanning && (
+            <button className="btn ghost" onClick={() => api.cancelScan()}>
+              {t("scan.cancel")}
+            </button>
+          )}
+          <button className="btn" onClick={startScan} disabled={scanning}>
+            {scanning ? <RefreshCw size={15} className="spin" /> : <ScanSearch size={15} />}
+            {scanning ? t("scan.scanning") : scan ? t("scan.rescan") : t("scan.start")}
+          </button>
+        </div>
       </div>
 
       {scanning && (

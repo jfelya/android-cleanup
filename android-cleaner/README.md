@@ -17,17 +17,24 @@ Nothing is deleted during scan or dry run.
 - Ready-to-run portable build: `AndroidStorageCleaner.exe` in the project root (and the workspace root).
 - Spanish (Latin America) is the default UI language; English is one click away.
 - Dark theme is the default; light theme is one click away.
-- Language and theme live in the top bar (and Settings) and persist across restarts.
-
+- Language and theme live in the sidebar footer (and Settings) and persist across restarts.
+- Streaming storage scan with live progress and cancel.
+- Device Health page: thermal status, load, memory/swap, reclaim counters, recent framework kills.
+- File-type breakdown (images, video, audio, documents, archives, APK, other).
 - USB device discovery, authorization state, and guided troubleshooting.
-- Android 11+ wireless pairing (`adb pair` + `adb connect`) with mDNS discovery.
+- Android 11+ wireless pairing (`adb pair` + `adb connect`), saved hosts, and disconnect.
 - Device dashboard: model, Android version, total/used/free storage.
 - Storage treemap, folder tree, and top-folder bars (custom SVG / `d3-hierarchy`).
-- Rule categories S1-S7, P1-P10, WhatsApp media, Telegram media, hash duplicates.
+- Rule categories S1-S7, P1-P10, WhatsApp media, Telegram media, hash duplicates, custom rules.
+- Category counts populate immediately after scanning; no dry run needed for counts.
 - Configurable protected paths, enforced at scan, dry-run, and deletion time.
+- Duplicate detail view with keeper path and copy list.
 - Hash-confirmed duplicate detection on the phone (`sha256sum`), never pulling media to the PC.
-- Optional system app-cache trim (`pm trim-caches`).
+- Localized dry-run reports and execution logs (Spanish/English).
+- In-app report/log viewer.
+- App-cache trim preview from `dumpsys diskstats`; optional `pm trim-caches`.
 - Portable config/reports/logs; no registry, no installer, no admin.
+- GitHub Actions CI for core tests, frontend tests, and production build.
 
 ## Safety model
 

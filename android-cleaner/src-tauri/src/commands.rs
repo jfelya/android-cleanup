@@ -1,9 +1,12 @@
 use android_cleaner_core::adb::{AdbClient, DeviceRow};
 use android_cleaner_core::cleanup;
 use android_cleaner_core::config::{self, AppConfig};
+use android_cleaner_core::disk;
 use android_cleaner_core::duplicates::{self, DuplicateGroup};
+use android_cleaner_core::health::{self, HealthSnapshot};
 use android_cleaner_core::model::{
-    Candidate, DeviceInfo, DryRun, ExecutionReport, ScanData, WirelessService,
+    Candidate, CategorySummary, DeviceInfo, DiskStats, DryRun, ExecutionReport, ScanData,
+    WirelessService,
 };
 use android_cleaner_core::report;
 use android_cleaner_core::rules;
@@ -12,14 +15,16 @@ use android_cleaner_core::scan;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
 pub struct AppState {
     pub client: Arc<AdbClient>,
     pub config: Mutex<AppConfig>,
-    pub scan: Mutex<Option<ScanData>>,
+    pub scan: Mutex<Option<Arc<ScanData>>>,
     pub dry_run: Mutex<Option<DryRun>>,
+    pub scan_cancel: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -29,6 +34,7 @@ impl AppState {
             config: Mutex::new(config),
             scan: Mutex::new(None),
             dry_run: Mutex::new(None),
+            scan_cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -86,6 +92,16 @@ pub fn connect_wireless(host: String, state: State<'_, AppState>) -> Result<Stri
 }
 
 #[tauri::command]
+pub fn disconnect_wireless(host: String, state: State<'_, AppState>) -> Result<String, String> {
+    state.client.disconnect(&host)
+}
+
+#[tauri::command]
+pub fn cancel_scan(state: State<'_, AppState>) {
+    state.scan_cancel.store(true, Ordering::Relaxed);
+}
+
+#[tauri::command]
 pub fn load_config(state: State<'_, AppState>) -> AppConfig {
     state.config.lock().unwrap().clone()
 }
@@ -111,20 +127,32 @@ pub async fn scan_device(
     let client = state.client.clone();
     let serial_for_task = serial.clone();
     let app_for_task = app.clone();
+    let cancel = state.scan_cancel.clone();
+    cancel.store(false, Ordering::Relaxed);
     let result = tauri::async_runtime::spawn_blocking(move || {
-        scan::scan(&serial_for_task, &client, |count| {
-            let _ = app_for_task.emit("scan-progress", count);
-        })
+        scan::scan(
+            &serial_for_task,
+            &client,
+            |count| {
+                let _ = app_for_task.emit("scan-progress", count);
+            },
+            cancel,
+        )
     })
     .await
     .map_err(|e| format!("scan task: {e}"))??;
-    *state.scan.lock().unwrap() = Some(result.clone());
-    let _ = app.emit("scan-complete", &result);
-    Ok(result)
+    let arc = Arc::new(result);
+    *state.scan.lock().unwrap() = Some(arc.clone());
+    let mut view = (*arc).clone();
+    view.entries.clear();
+    let _ = app.emit("scan-complete", &view);
+    Ok(view)
 }
 
 #[tauri::command]
 pub async fn build_dry_run(
+    serial: String,
+    language: String,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<DryRun, String> {
@@ -134,6 +162,9 @@ pub async fn build_dry_run(
         .unwrap()
         .clone()
         .ok_or_else(|| "scan the device first".to_string())?;
+    if scan.serial != serial {
+        return Err("the scan belongs to a different device".into());
+    }
     let config = state.config.lock().unwrap().clone();
     let client = state.client.clone();
     let app_for_task = app.clone();
@@ -174,7 +205,7 @@ pub async fn build_dry_run(
             &duplicate_groups,
             &config,
         );
-        let _ = report::write_report(&config::data_dir(), &dry)?;
+        let _ = report::write_report(&config::data_dir(), &dry, &language)?;
         Ok::<DryRun, String>(dry)
     })
     .await
@@ -189,6 +220,7 @@ pub async fn execute_cleanup(
     serial: String,
     confirmation: String,
     paths: Vec<String>,
+    language: String,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ExecutionReport, String> {
@@ -248,6 +280,7 @@ pub async fn execute_cleanup(
             &paths,
             &categories,
             &config,
+            &language,
             &app_for_task,
         )
     })
@@ -264,6 +297,7 @@ fn run_cleanup(
     paths: &[String],
     categories: &[String],
     config: &AppConfig,
+    language: &str,
     app: &AppHandle,
 ) -> Result<ExecutionReport, String> {
     let before_free = cleanup::free_space(client, serial)?;
@@ -274,7 +308,10 @@ fn run_cleanup(
     fs::create_dir_all(&log_dir).map_err(|e| format!("create log dir: {e}"))?;
     let log_path = log_dir.join(format!("{id}.log"));
     let mut log = String::new();
-    log.push_str(&format!("# cleanup {id}\n"));
+    log.push_str(&format!(
+        "# {} {id}\n",
+        if language == "es" { "limpieza" } else { "cleanup" }
+    ));
     for p in &packages {
         log.push_str(&format!("# force-stop {}: {}\n", p.package, p.message));
     }
@@ -344,6 +381,63 @@ pub fn trim_cache(
 ) -> Result<u64, String> {
     cleanup::trim_caches(&state.client, &serial, target_bytes)?;
     cleanup::free_space(&state.client, &serial)
+}
+
+#[tauri::command]
+pub fn scan_rule_counts(
+    serial: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<CategorySummary>, String> {
+    let scan = state
+        .scan
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "scan the device first".to_string())?;
+    if scan.serial != serial {
+        return Err("the scan belongs to a different device".into());
+    }
+    let config = state.config.lock().unwrap().clone();
+    let candidates = rules::evaluate(&scan.entries, &config);
+    let dry = report::build_dry_run(
+        &scan,
+        &candidates,
+        &config.protected_paths,
+        &[],
+        &config,
+    );
+    Ok(dry.categories)
+}
+
+#[tauri::command]
+pub fn device_health(
+    serial: String,
+    state: State<'_, AppState>,
+) -> Result<HealthSnapshot, String> {
+    health::device_health(&state.client, &serial)
+}
+
+#[tauri::command]
+pub fn disk_stats(serial: String, state: State<'_, AppState>) -> Result<DiskStats, String> {
+    disk::disk_stats(&state.client, &serial)
+}
+
+#[tauri::command]
+pub fn read_text(path: String) -> Result<String, String> {
+    let base = config::data_dir()
+        .canonicalize()
+        .map_err(|e| format!("resolve data dir: {e}"))?;
+    let target = std::path::PathBuf::from(&path)
+        .canonicalize()
+        .map_err(|e| format!("resolve file: {e}"))?;
+    if !target.starts_with(&base) {
+        return Err("only files inside the data folder can be read".into());
+    }
+    let meta = fs::metadata(&target).map_err(|e| format!("stat file: {e}"))?;
+    if meta.len() > 5 * 1024 * 1024 {
+        return Err("file is too large to preview (max 5 MiB)".into());
+    }
+    fs::read_to_string(&target).map_err(|e| format!("read file: {e}"))
 }
 
 #[tauri::command]

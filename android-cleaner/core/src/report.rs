@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use crate::duplicates::DuplicateGroup;
 use crate::model::{
-    Candidate, CategorySummary, DryRun, DryRunSummary, ReportPaths, ScanData,
+    Candidate, CategorySummary, DryRun, DryRunSummary, DuplicateSummary, ReportPaths, ScanData,
 };
 use crate::rules;
 use std::collections::HashMap;
@@ -46,6 +46,15 @@ pub fn build_dry_run(
         .iter()
         .map(|g| g.size * g.duplicates.len() as u64)
         .sum();
+    let duplicates: Vec<DuplicateSummary> = duplicate_groups
+        .iter()
+        .map(|g| DuplicateSummary {
+            hash: g.hash.clone(),
+            size: g.size,
+            keep: g.keep.path.clone(),
+            copies: g.duplicates.iter().map(|d| d.path.clone()).collect(),
+        })
+        .collect();
     let mut warnings = Vec::new();
     if selected.iter().any(|c| c.category_id == "WA_MEDIA") {
         warnings.push(
@@ -85,10 +94,11 @@ pub fn build_dry_run(
         categories,
         protected_paths: protected.to_vec(),
         candidates: selected,
+        duplicates,
     }
 }
 
-pub fn write_report(base: &Path, dry: &DryRun) -> Result<ReportPaths, String> {
+pub fn write_report(base: &Path, dry: &DryRun, lang: &str) -> Result<ReportPaths, String> {
     let dir = base.join("reports").join(&dry.id);
     fs::create_dir_all(&dir).map_err(|e| format!("create report dir: {e}"))?;
     let json_path = dir.join("dry-run.json");
@@ -99,7 +109,11 @@ pub fn write_report(base: &Path, dry: &DryRun) -> Result<ReportPaths, String> {
         serde_json::to_string_pretty(dry).map_err(|e| format!("serialize report: {e}"))?,
     )
     .map_err(|e| format!("write json: {e}"))?;
-    let mut csv = String::from("category,size_bytes,mtime,path\n");
+    let mut csv = if lang == "es" {
+        String::from("categoria,bytes,fecha,ruta\n")
+    } else {
+        String::from("category,size_bytes,mtime,path\n")
+    };
     for c in &dry.candidates {
         csv.push_str(&format!(
             "{},{},{},{}\n",
@@ -110,7 +124,7 @@ pub fn write_report(base: &Path, dry: &DryRun) -> Result<ReportPaths, String> {
         ));
     }
     fs::write(&csv_path, csv).map_err(|e| format!("write csv: {e}"))?;
-    fs::write(&md_path, markdown(dry)).map_err(|e| format!("write markdown: {e}"))?;
+    fs::write(&md_path, markdown(dry, lang)).map_err(|e| format!("write markdown: {e}"))?;
     Ok(ReportPaths {
         json: json_path.display().to_string(),
         csv: csv_path.display().to_string(),
@@ -118,55 +132,165 @@ pub fn write_report(base: &Path, dry: &DryRun) -> Result<ReportPaths, String> {
     })
 }
 
-pub fn markdown(dry: &DryRun) -> String {
+pub fn markdown(dry: &DryRun, lang: &str) -> String {
+    let es = lang == "es";
     let mut out = String::new();
-    out.push_str("# Android Storage Cleaner — dry run\n\n");
-    out.push_str(&format!("- Device: `{}`\n", dry.serial));
-    out.push_str(&format!("- Generated: {}\n", dry.generated_at));
-    out.push_str(&format!("- Files selected: **{}**\n", dry.summary.candidate_files));
+    out.push_str(if es {
+        "# Limpiador de almacenamiento — simulación\n\n"
+    } else {
+        "# Android Storage Cleaner — dry run\n\n"
+    });
     out.push_str(&format!(
-        "- Bytes selected: **{}** ({:.2} MiB)\n",
+        "- {}: `{}`\n",
+        if es { "Dispositivo" } else { "Device" },
+        dry.serial
+    ));
+    out.push_str(&format!(
+        "- {}: {}\n",
+        if es { "Generado" } else { "Generated" },
+        dry.generated_at
+    ));
+    out.push_str(&format!(
+        "- {}: **{}**\n",
+        if es { "Archivos seleccionados" } else { "Files selected" },
+        dry.summary.candidate_files
+    ));
+    out.push_str(&format!(
+        "- {}: **{}** ({:.2} MiB)\n",
+        if es { "Bytes seleccionados" } else { "Bytes selected" },
         dry.summary.candidate_bytes,
         dry.summary.candidate_bytes as f64 / 1_048_576.0
     ));
     out.push_str(&format!(
-        "- Duplicate copies: {} ({:.2} MiB)\n\n",
+        "- {}: {} ({:.2} MiB)\n\n",
+        if es { "Copias duplicadas" } else { "Duplicate copies" },
         dry.summary.duplicate_files,
         dry.summary.duplicate_bytes as f64 / 1_048_576.0
     ));
     if !dry.summary.warnings.is_empty() {
-        out.push_str("## Warnings\n\n");
+        out.push_str(if es { "## Advertencias\n\n" } else { "## Warnings\n\n" });
         for warning in &dry.summary.warnings {
-            out.push_str(&format!("- {warning}\n"));
+            out.push_str(&format!("- {}\n", localize_warning(warning, lang)));
         }
         out.push('\n');
     }
-    out.push_str("## Categories\n\n| ID | Category | Confidence | Files | MiB |\n|---|---|---|---:|---:|\n");
+    out.push_str(if es {
+        "## Categorías\n\n| ID | Categoría | Confianza | Archivos | MiB |\n|---|---|---|---:|---:|\n"
+    } else {
+        "## Categories\n\n| ID | Category | Confidence | Files | MiB |\n|---|---|---|---:|---:|\n"
+    });
     for c in &dry.categories {
         out.push_str(&format!(
             "| {} | {} | {:?} | {} | {:.2} |\n",
             c.id,
-            c.label,
+            category_label(&c.id, &c.label, lang),
             c.confidence,
             c.files,
             c.bytes as f64 / 1_048_576.0
         ));
     }
-    out.push_str("\n## Protected paths\n\n");
+    out.push_str(if es {
+        "\n## Rutas protegidas\n\n"
+    } else {
+        "\n## Protected paths\n\n"
+    });
     for p in &dry.protected_paths {
         out.push_str(&format!("- `{p}`\n"));
     }
-    out.push_str("\n## First candidates\n\n");
+    if !dry.duplicates.is_empty() {
+        out.push_str(if es {
+            "\n## Duplicados\n\n"
+        } else {
+            "\n## Duplicates\n\n"
+        });
+        for group in dry.duplicates.iter().take(50) {
+            out.push_str(&format!(
+                "- `{}` — {} bytes; {}: `{}`; {}\n",
+                group.hash,
+                group.size,
+                if es { "conservar" } else { "keep" },
+                group.keep,
+                group.copies.len()
+            ));
+        }
+    }
+    out.push_str(if es {
+        "\n## Primeros candidatos\n\n"
+    } else {
+        "\n## First candidates\n\n"
+    });
     for c in dry.candidates.iter().take(100) {
         out.push_str(&format!("- `{}` — {} bytes ({})\n", c.path, c.size, c.category_id));
     }
     if dry.candidates.len() > 100 {
         out.push_str(&format!(
-            "\n… and {} more. See candidates.csv.\n",
-            dry.candidates.len() - 100
+            "\n{} {} {}\n",
+            if es { "… y" } else { "… and" },
+            dry.candidates.len() - 100,
+            if es {
+                "más. Ver candidates.csv."
+            } else {
+                "more. See candidates.csv."
+            }
         ));
     }
     out
+}
+
+fn category_label(id: &str, fallback: &str, lang: &str) -> String {
+    if lang != "es" {
+        return fallback.to_string();
+    }
+    let label = match id {
+        "S1" => "Basura de tonos",
+        "S2" => "Miniaturas de galería",
+        "S3" => "Temporales de WhatsApp",
+        "S4" => "Multimedia de 0 bytes",
+        "S5" => "Archivos de bloqueo obsoletos",
+        "S6" => "Caché de errores de MIUI",
+        "S7" => "Marcador de caché de Android",
+        "P1" => "Vistas previas de WhatsApp",
+        "P2" => "Caché de estados de WhatsApp",
+        "P3" => "Copias de stickers de WhatsApp",
+        "P4" => "Caché de Telegram",
+        "P5" => "Registros de Wild Rift",
+        "P6" => "Otros registros de apps",
+        "P7" => "Caché de SHAREit",
+        "P8" => "Portadas de ReadEra",
+        "P9" => "Descargas incompletas",
+        "P10" => "Duplicados por hash",
+        "WA_MEDIA" => "Multimedia de WhatsApp",
+        "TG_MEDIA" => "Multimedia de Telegram",
+        "CUSTOM" => "Basura personalizada",
+        _ => return fallback.to_string(),
+    };
+    label.to_string()
+}
+
+fn localize_warning(warning: &str, lang: &str) -> String {    if lang != "es" {
+        return warning.to_string();
+    }
+    match warning {
+        "WhatsApp media will disappear from chats. Databases and documents are kept." => {
+            "La multimedia de WhatsApp desaparecerá de los chats. Las bases de datos y los documentos se conservan.".to_string()
+        }
+        "Telegram media will disappear from chats. Documents and files are kept." => {
+            "La multimedia de Telegram desaparecerá de los chats. Los documentos y archivos se conservan.".to_string()
+        }
+        "Duplicate cleanup keeps one copy of each hash group." => {
+            "La limpieza de duplicados conserva una copia de cada grupo de hash.".to_string()
+        }
+        _ => {
+            if let Some(rest) = warning
+                .strip_prefix("App cache trim will run after deletion, targeting about ")
+                .and_then(|w| w.strip_suffix(" GB."))
+            {
+                format!("La limpieza de caché se ejecutará después de eliminar, con un objetivo de aproximadamente {rest} GB.")
+            } else {
+                warning.to_string()
+            }
+        }
+    }
 }
 
 fn csv_escape(value: &str) -> String {
@@ -205,6 +329,7 @@ mod tests {
             total_bytes: 20,
             entries: vec![],
             folders: Vec::<FolderStat>::new(),
+            type_stats: vec![],
         }
     }
 
@@ -231,11 +356,16 @@ mod tests {
         let candidates = vec![candidate("WA_MEDIA", "/a.jpg", 10)];
         let mut dry = build_dry_run(&scan(), &candidates, &cfg.protected_paths, &[], &cfg);
         dry.generated_at = "2026-01-01".into();
-        let md = markdown(&dry);
+        let md = markdown(&dry, "en");
         assert!(md.contains("SERIAL"));
         assert!(md.contains("WhatsApp media will disappear"));
         assert!(md.contains("WA_MEDIA"));
         assert!(md.contains("`/a.jpg`"));
+
+        let md_es = markdown(&dry, "es");
+        assert!(md_es.contains("## Categorías"));
+        assert!(md_es.contains("Multimedia de WhatsApp"));
+        assert!(md_es.contains("desaparecerá"));
     }
 
     #[test]

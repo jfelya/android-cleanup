@@ -3,6 +3,7 @@ import { HardDrive, RefreshCw, ScanSearch, X } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { ConnectPage } from "./pages/ConnectPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { HealthPage } from "./pages/HealthPage";
 import { ScanPage } from "./pages/ScanPage";
 import { RulesPage } from "./pages/RulesPage";
 import { ProtectedPage } from "./pages/ProtectedPage";
@@ -13,12 +14,13 @@ import { api, onCleanupProgress, onScanProgress } from "./lib/tauri";
 import { useAppStore } from "./store";
 import { useI18n } from "./useI18n";
 import { LanguageThemeToggle } from "./components/LanguageThemeToggle";
-import type { TranslationKey } from "./i18n";
+import { translateError, type TranslationKey } from "./i18n";
 import type { Page } from "./types";
 
 const pageMeta: Record<Page, [TranslationKey, TranslationKey]> = {
   connect: ["page.connect", "page.connectSub"],
   dashboard: ["page.dashboard", "page.dashboardSub"],
+  health: ["page.health", "page.healthSub"],
   scan: ["page.scan", "page.scanSub"],
   rules: ["page.rules", "page.rulesSub"],
   protected: ["page.protected", "page.protectedSub"],
@@ -37,6 +39,9 @@ function App() {
   const device = useAppStore((s) => s.device);
   const setDevice = useAppStore((s) => s.setDevice);
   const setConfig = useAppStore((s) => s.setConfig);
+  const scan = useAppStore((s) => s.scan);
+  const setScan = useAppStore((s) => s.setScan);
+  const setDryRun = useAppStore((s) => s.setDryRun);
   const setScanProgress = useAppStore((s) => s.setScanProgress);
   const setCleanupProgress = useAppStore((s) => s.setCleanupProgress);
   const error = useAppStore((s) => s.error);
@@ -94,6 +99,30 @@ function App() {
   }, [selectedSerial, setDevice]);
 
   useEffect(() => {
+    if (!selectedSerial) {
+      setScan(null);
+      setDryRun(null);
+      return;
+    }
+    if (scan && scan.serial !== selectedSerial) {
+      setScan(null);
+      setDryRun(null);
+    }
+  }, [selectedSerial, scan?.serial, setScan, setDryRun]);
+
+  useEffect(() => {
+    if (!selectedSerial) return;
+    const online = devices.some(
+      (d) => d.serial === selectedSerial && d.state === "device",
+    );
+    if (!online) {
+      setDevice(null);
+      setScan(null);
+      setDryRun(null);
+    }
+  }, [devices, selectedSerial, setDevice, setScan, setDryRun]);
+
+  useEffect(() => {
     const unlisteners: Array<() => void> = [];
     Promise.all([
       onScanProgress((count) => setScanProgress(count)),
@@ -146,6 +175,7 @@ function App() {
         <div className="content">
           {page === "connect" && <ConnectPage />}
           {page === "dashboard" && <DashboardPage />}
+          {page === "health" && <HealthPage />}
           {page === "scan" && <ScanPage />}
           {page === "rules" && <RulesPage />}
           {page === "protected" && <ProtectedPage />}
@@ -158,7 +188,7 @@ function App() {
       {error && (
         <div className="toast">
           <HardDrive size={16} />
-          <span>{error}</span>
+          <span>{translateError(language, error)}</span>
           <button className="icon-btn" onClick={() => setError(null)} aria-label={t("common.close")}>
             <X size={14} />
           </button>

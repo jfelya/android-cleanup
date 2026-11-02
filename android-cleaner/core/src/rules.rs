@@ -32,6 +32,7 @@ pub fn default_categories() -> Vec<RuleCategory> {
         ("P10", "Hash duplicates", Confidence::Probable, "Exact duplicates confirmed by SHA-256; one copy is kept."),
         ("WA_MEDIA", "WhatsApp media", Confidence::Ask, "Images, video, audio, voice notes, GIFs, and stickers inside chats."),
         ("TG_MEDIA", "Telegram media", Confidence::Ask, "Images, video, audio, and stories inside chats."),
+        ("CUSTOM", "Custom junk", Confidence::Probable, "User-defined junk folders and extensions."),
     ];
     rows.into_iter()
         .map(|(id, label, confidence, description)| RuleCategory {
@@ -71,6 +72,23 @@ pub fn evaluate_at(entries: &[FileEntry], config: &AppConfig, now: i64) -> Vec<C
     for entry in entries {
         let path = entry.path.as_str();
         if is_protected(path, &config.protected_paths) {
+            continue;
+        }
+        if let Some(custom) = config.custom_rules.iter().find(|rule| {
+            under(path, &rule.path_prefix)
+                && (rule.extensions.is_empty()
+                    || rule
+                        .extensions
+                        .iter()
+                        .any(|wanted| wanted.trim_start_matches('.').eq_ignore_ascii_case(&ext(path))))
+        }) {
+            out.push(Candidate {
+                category_id: "CUSTOM".into(),
+                path: entry.path.clone(),
+                size: entry.size,
+                mtime: entry.mtime,
+                reason: format!("custom: {}", custom.label),
+            });
             continue;
         }
         let Some((id, reason)) = classify(entry, now) else {
@@ -304,5 +322,24 @@ mod tests {
         let got = evaluate_at(&entries, &cfg, now);
         assert_eq!(got.len(), 1);
         assert!(got[0].path.contains("org.videolan.vlc"));
+    }
+
+    #[test]
+    fn matches_custom_rules_and_respects_extensions() {
+        let now = 1_700_000_000;
+        let mut cfg = AppConfig::default();
+        cfg.custom_rules.push(crate::config::CustomRule {
+            label: "My cache".into(),
+            path_prefix: "/storage/emulated/0/MyCache".into(),
+            extensions: vec!["tmp".into()],
+        });
+        let entries = vec![
+            e("/storage/emulated/0/MyCache/a.tmp", 10, now),
+            e("/storage/emulated/0/MyCache/a.jpg", 10, now),
+            e("/storage/emulated/0/Fely/MyCache/a.tmp", 10, now),
+        ];
+        let got = evaluate_at(&entries, &cfg, now);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].category_id, "CUSTOM");
     }
 }

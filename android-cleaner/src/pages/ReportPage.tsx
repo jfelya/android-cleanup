@@ -33,9 +33,11 @@ export function ReportPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [visibleCount, setVisibleCount] = useState(300);
 
   useEffect(() => {
     setSelectedPaths(new Set(dryRun?.candidates.map((c) => c.path) ?? []));
+    setVisibleCount(300);
   }, [dryRun]);
 
   const selectedCandidates = useMemo(
@@ -95,6 +97,7 @@ export function ReportPage() {
         device.serial,
         "DELETE",
         selectedCandidates.map((c) => c.path),
+        language,
       );
       setExecution(report);
       setConfirmOpen(false);
@@ -219,6 +222,32 @@ export function ReportPage() {
         </section>
       </div>
 
+      {dryRun.duplicates.length > 0 && (
+        <section className="card">
+          <div className="card-head">
+            <div>
+              <h2>{t("report.duplicateGroups")}</h2>
+              <p>{t("report.duplicateHint")}</p>
+            </div>
+            <span className="count-badge">{dryRun.duplicates.length}</span>
+          </div>
+          <div className="dup-list">
+            {dryRun.duplicates.slice(0, 30).map((group) => (
+              <div key={group.hash} className="dup-row">
+                <div>
+                  <strong>{formatBytes(group.size)} · {t("report.copiesCount", { count: group.copies.length + 1 })}</strong>
+                  <span>{t("report.keep")}: <code>{shortPath(group.keep, 70)}</code></span>
+                </div>
+                <details>
+                  <summary>{t("report.copyList")}</summary>
+                  {group.copies.map((path) => <code key={path}>{shortPath(path, 90)}</code>)}
+                </details>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="card">
         <div className="card-head">
           <div><h2>{t("report.candidates")}</h2><p>{t("report.matching", { count: formatCount(candidates.length) })}</p></div>
@@ -242,7 +271,7 @@ export function ReportPage() {
         </div>
         <div className="candidate-table">
           <div className="candidate-head"><span></span><span>{t("report.path")}</span><span>{t("report.category")}</span><span>{t("report.size")}</span></div>
-          {candidates.slice(0, 300).map((candidate) => (
+          {candidates.slice(0, visibleCount).map((candidate) => (
             <div key={candidate.path} className="candidate-row">
               <input
                 type="checkbox"
@@ -255,7 +284,13 @@ export function ReportPage() {
               <b>{formatBytes(candidate.size)}</b>
             </div>
           ))}
-          {candidates.length > 300 && <div className="table-more">{t("report.more", { count: formatCount(candidates.length - 300) })}</div>}
+          {candidates.length > visibleCount && (
+            <div className="table-more">
+              <button className="btn ghost small" onClick={() => setVisibleCount((n) => n + 300)}>
+                {t("report.loadMore")} ({formatCount(candidates.length - visibleCount)})
+              </button>
+            </div>
+          )}
           {candidates.length === 0 && <div className="table-more">{t("report.noMatch")}</div>}
         </div>
       </section>
