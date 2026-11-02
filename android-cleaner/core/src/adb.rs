@@ -163,8 +163,6 @@ impl AdbClient {
                 "-s".into(),
                 serial.into(),
                 "shell".into(),
-                "sh".into(),
-                "-c".into(),
                 cmd.into(),
             ],
             None,
@@ -173,15 +171,14 @@ impl AdbClient {
     }
 
     pub fn shell_stdin(&self, serial: &str, cmd: &str, input: &str) -> Result<String, String> {
+        // adb joins argv with spaces. Passing `sh -c` and the script as separate
+        // args lets the device shell run `sh -c <first-word>` with no script,
+        // which makes commands like getprop dump every property. Wrap the
+        // whole script in single quotes and send it as one argument.
+        let quoted = cmd.replace('\'', "'\\''");
+        let remote = format!("sh -c '{quoted}'");
         let out = self.run(
-            &[
-                "-s".into(),
-                serial.into(),
-                "shell".into(),
-                "sh".into(),
-                "-c".into(),
-                cmd.into(),
-            ],
+            &["-s".into(), serial.into(), "shell".into(), remote],
             Some(input),
         )?;
         Ok(out.stdout)
@@ -193,8 +190,6 @@ impl AdbClient {
                 "-s".into(),
                 serial.into(),
                 "exec-out".into(),
-                "sh".into(),
-                "-c".into(),
                 cmd.into(),
             ],
             None,
@@ -310,6 +305,7 @@ mod tests {
     struct FakeRunner {
         response: Mutex<CommandOutput>,
         seen: Mutex<Vec<Vec<String>>>,
+        stdin_seen: Mutex<Vec<Option<String>>>,
     }
 
     impl FakeRunner {
@@ -321,6 +317,7 @@ mod tests {
                     stderr: String::new(),
                 }),
                 seen: Mutex::new(Vec::new()),
+                stdin_seen: Mutex::new(Vec::new()),
             }
         }
         fn failing(stderr: &str) -> Self {
@@ -331,6 +328,7 @@ mod tests {
                     stderr: stderr.into(),
                 }),
                 seen: Mutex::new(Vec::new()),
+                stdin_seen: Mutex::new(Vec::new()),
             }
         }
     }
@@ -340,9 +338,13 @@ mod tests {
             &self,
             _adb: &Path,
             args: &[String],
-            _stdin: Option<&str>,
+            stdin: Option<&str>,
         ) -> Result<CommandOutput, String> {
             self.seen.lock().unwrap().push(args.to_vec());
+            self.stdin_seen
+                .lock()
+                .unwrap()
+                .push(stdin.map(str::to_string));
             let r = self.response.lock().unwrap();
             Ok(CommandOutput {
                 status: r.status,
@@ -398,5 +400,54 @@ XYZ                    offline transport_id:4
         let _ = client.devices().unwrap();
         let seen = runner.seen.lock().unwrap();
         assert_eq!(seen[0], vec!["devices", "-l"]);
+    }
+
+    #[test]
+    fn shell_sends_one_remote_command() {
+        let runner = Arc::new(FakeRunner::new(""));
+        let client = AdbClient::with_runner(PathBuf::from("adb"), runner.clone());
+        let _ = client.shell("S", "getprop ro.product.model").unwrap();
+        let seen = runner.seen.lock().unwrap();
+        assert_eq!(
+            seen[0],
+            vec!["-s", "S", "shell", "getprop ro.product.model"]
+        );
+    }
+
+    #[test]
+    fn exec_out_sends_one_remote_command() {
+        let runner = Arc::new(FakeRunner::new(""));
+        let client = AdbClient::with_runner(PathBuf::from("adb"), runner.clone());
+        let _ = client
+            .exec_out("S", "find /sdcard -type f | head -1")
+            .unwrap();
+        let seen = runner.seen.lock().unwrap();
+        assert_eq!(
+            seen[0],
+            vec!["-s", "S", "exec-out", "find /sdcard -type f | head -1"]
+        );
+    }
+
+    #[test]
+    fn shell_stdin_quotes_the_script_and_forwards_input() {
+        let runner = Arc::new(FakeRunner::new(""));
+        let client = AdbClient::with_runner(PathBuf::from("adb"), runner.clone());
+        let _ = client
+            .shell_stdin(
+                "S",
+                "while IFS= read -r p; do echo \"$p\"; done",
+                "a\nb\n",
+            )
+            .unwrap();
+        let seen = runner.seen.lock().unwrap();
+        assert_eq!(seen[0][0], "-s");
+        assert_eq!(seen[0][1], "S");
+        assert_eq!(seen[0][2], "shell");
+        assert!(seen[0][3].starts_with("sh -c '"));
+        assert!(seen[0][3].contains("while IFS= read"));
+        assert_eq!(
+            runner.stdin_seen.lock().unwrap()[0].as_deref(),
+            Some("a\nb\n")
+        );
     }
 }
