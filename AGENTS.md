@@ -15,3 +15,8 @@
 - Source lives in `android-cleaner/`.
 - Portable build: `cd android-cleaner; npm.cmd run build:portable`.
 - Tests: `cd android-cleaner/core; cargo test` and `cd android-cleaner; npm.cmd test`.
+
+## Context
+
+- Device health/tuning findings, confirmed ADB commands, and the plan for turning them into app
+  features live in `DEVICE-TUNING.md`. Read it before touching anything outside storage cleanup.
